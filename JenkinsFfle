@@ -1,0 +1,176 @@
+pipeline {
+
+    agent any
+
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+        APP_IMAGE    = "praveen22233/ecommerce-app"
+        K8S_REPO     = "E-Commerce-Application-k8s-deploy"
+        K8S_REPO_URL = "https://github.com/Praveenchoudary/E-Commerce-Application-k8s-deploy.git"
+    }
+
+    options {
+        disableConcurrentBuilds()
+        timestamps()
+    }
+
+    stages {
+
+        /* ----------------------------------------------------
+                        CLEAN WORKSPACE
+        ------------------------------------------------------*/
+        stage("Clean Workspace") {
+            steps {
+                cleanWs()
+            }
+        }
+
+        /* ----------------------------------------------------
+                        CHECKOUT APPLICATION REPO
+        ------------------------------------------------------*/
+        stage("Checkout App Repo") {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/Praveenchoudary/E-Commerce-Application.git'
+            }
+        }
+
+        /* ----------------------------------------------------
+                        BUILD WAR FILE
+        ------------------------------------------------------*/
+        stage("Build WAR") {
+            steps {
+                sh """
+                    mvn clean package -DskipTests
+                    cp target/*.war Docker-deployment/app/shopping-app.war
+                """
+            }
+        }
+
+        /* ----------------------------------------------------
+                       SONAR SCAN
+        ------------------------------------------------------*/
+        stage("Sonar Scan") {
+            steps {
+                withSonarQubeEnv("sonar-scanner") {
+                    sh """
+                        ${SCANNER_HOME}/bin/sonar-scanner \
+                        -Dsonar.projectKey=ecommerce-app \
+                        -Dsonar.sources=src \
+                        -Dsonar.java.binaries=target/classes
+                    """
+                }
+            }
+        }
+
+        /* ----------------------------------------------------
+                        OWASP DEP CHECK
+        ------------------------------------------------------*/
+        stage("OWASP Dependency Check") {
+            steps {
+                dependencyCheck additionalArguments: '--scan . --format XML',
+                                odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+
+        /* ----------------------------------------------------
+                       BUILD DOCKER IMAGE
+        ------------------------------------------------------*/
+        stage("Build Docker Image") {
+            steps {
+                sh """
+                    cd Docker-deployment/app
+                    docker build -t ${APP_IMAGE}:${BUILD_NUMBER} .
+                    docker tag ${APP_IMAGE}:${BUILD_NUMBER} ${APP_IMAGE}:latest
+                """
+            }
+        }
+
+        /* ----------------------------------------------------
+                       TRIVY SCAN
+        ------------------------------------------------------*/
+        stage("Trivy Scan Image") {
+            steps {
+                sh "trivy image ${APP_IMAGE}:${BUILD_NUMBER}"
+            }
+        }
+
+        /* ----------------------------------------------------
+                       PUSH IMAGE TO DOCKER HUB
+        ------------------------------------------------------*/
+        stage("Push Image to DockerHub") {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'dockerhub-creds') {
+                        sh "docker push ${APP_IMAGE}:${BUILD_NUMBER}"
+                        sh "docker push ${APP_IMAGE}:latest"
+                    }
+                }
+            }
+        }
+
+        /* ----------------------------------------------------
+              CLONE K8S DEPLOYMENT REPO (SEPARATE REPO)
+        ------------------------------------------------------*/
+        stage("Clone K8s Repo") {
+            steps {
+                withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
+
+                    sh """
+                        git clone https://${GH_TOKEN}@github.com/Praveenchoudary/${K8S_REPO}.git
+                    """
+                }
+            }
+        }
+
+        /* ----------------------------------------------------
+                UPDATE IMAGE TAG INSIDE K8s DEPLOYMENT REPO
+        ------------------------------------------------------*/
+        stage("Update K8s YAML Tag") {
+            steps {
+                sh """
+                    echo "Updating YAML image tag to ${BUILD_NUMBER}"
+
+                    sed -i "s#image: praveen22233/ecommerce-app:.*#image: praveen22233/ecommerce-app:${BUILD_NUMBER}#g" \
+                    ${K8S_REPO}/k8s-deployment/deployment.yaml
+                """
+            }
+        }
+
+        /* ----------------------------------------------------
+                  COMMIT CHANGES TO K8s REPO & PUSH
+        ------------------------------------------------------*/
+        stage("Commit YAML Changes to K8s Repo") {
+            steps {
+                withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
+
+                    sh """
+                        cd ${K8S_REPO}
+
+                        git config user.email "jenkins@server.com"
+                        git config user.name  "Jenkins"
+
+                        git add .
+                        git commit -m "Update image tag to build number ${BUILD_NUMBER}" || true
+                        git push https://${GH_TOKEN}@github.com/Praveenchoudary/${K8S_REPO}.git main
+                    """
+                }
+            }
+        }
+
+    }
+
+    /* ----------------------------------------------------
+                        BUILD STATUS
+    ------------------------------------------------------*/
+    post {
+        success {
+            echo " Build Completed — ArgoCD will now auto-sync!"
+        }
+        failure {
+            echo " Build Failed — Check logs!"
+        }
+    }
+
+}
