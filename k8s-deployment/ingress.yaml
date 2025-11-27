@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress 
+metadata:
+  name: ecommerce-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: ecommerce.praveens.online
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ecommerce-app
+            port:
+              number: 8080
