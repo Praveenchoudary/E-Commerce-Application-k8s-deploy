@@ -31,7 +31,7 @@ pipeline {
         stage("Checkout App Repo") {
             steps {
                 git branch: 'main',
-                    url: 'https://github.com/Praveenchoudary/E-Commerce-Application.git'
+                    url: 'https://github.com/Praveenchoudary/E-Commerce-Application-ci-part.git'
             }
         }
 
@@ -166,10 +166,10 @@ pipeline {
     ------------------------------------------------------*/
     post {
         success {
-            echo " Build Completed — ArgoCD will now auto-sync!"
+            echo "🎉 Build Completed — ArgoCD will now auto-sync!"
         }
         failure {
-            echo " Build Failed — Check logs!"
+            echo "❌ Build Failed — Check logs!"
         }
     }
 
