@@ -1,3 +1,7 @@
+customer_email,service_id,service_type,issue_type,state,state_time
+santo@finezza.in,23475,kubernates,failed_state,Failed Scaling,0 days 0 hours 31 minutes
+
+
 pipeline {
 
     agent any
@@ -160,17 +164,3 @@ pipeline {
         }
 
     }
-
-    /* ----------------------------------------------------
-                        BUILD STATUS
-    ------------------------------------------------------*/
-    post {
-        success {
-            echo "🎉 Build Completed — ArgoCD will now auto-sync!"
-        }
-        failure {
-            echo "❌ Build Failed — Check logs!"
-        }
-    }
-
-}
